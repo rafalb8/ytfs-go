@@ -15,10 +15,18 @@ Default install location: `~/go/bin`
 
 # Usage
 
-Mount in empty directory
+Create empty directory
 
     $ mkdir youtube
+
+Mount file system using playlist url 
+
     $ ~/go/bin/ytfs-go youtube "https://www.youtube.com/playlist?list=PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj"
+
+Or using playlist id
+
+    $ ~/go/bin/ytfs-go youtube PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj
+
 
 
 # Dependencies
