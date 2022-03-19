@@ -25,3 +25,4 @@ Mount in empty directory
 
 - FUSE - [bazil/fuse](https://github.com/bazil/fuse)
 - youtube - [kkdai/youtube](https://github.com/kkdai/youtube)
+- FFmpeg - If using `-a wav` or `-a mp3` flag
