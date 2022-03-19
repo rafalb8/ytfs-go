@@ -15,6 +15,20 @@ import (
 	"github.com/kkdai/youtube/v2"
 )
 
+var AudioFormat string
+
+type AudioType struct {
+	Mime      string
+	Extension string
+}
+
+var AudioFormatMap = map[string]AudioType{
+	"aac":  {"mp4a", "mp4"},
+	"opus": {"opus", "webm"},
+	"wav":  {"mp4a", "wav"}, // aac -> wav
+	"mp3":  {"mp4a", "mp3"}, // aac -> mp3
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "  %s MOUNTPOINT PLAYLIST_URL\n", os.Args[0])
@@ -22,12 +36,13 @@ func usage() {
 }
 
 func main() {
-	// playlist := GetPlaylist("https://www.youtube.com/playlist?list=PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj")
-
+	flag.StringVar(&AudioFormat, "a", "aac", "Set audio format (aac, opus, wav, mp3)")
 	flag.Usage = usage
 	flag.Parse()
 
-	if flag.NArg() != 2 {
+	defFormat, exists := AudioFormatMap[AudioFormat]
+
+	if flag.NArg() != 2 || !exists {
 		usage()
 		os.Exit(2)
 	}
@@ -36,24 +51,31 @@ func main() {
 	playlistURL := flag.Arg(1)
 
 	// Get Playlist videos
-	playlist := GetPlaylist(playlistURL)
+	playlist, err := GetPlaylist(playlistURL)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 
 	files := map[string]*File{}
 	dirEntries := []fuse.Dirent{}
+
+	fmt.Println("Videos found:")
 	for i, entry := range playlist.Videos {
 		// Create dir entry
 		dirEntry := fuse.Dirent{
-			Name:  entry.Title + ".mp4",
+			Name:  entry.Title + "." + defFormat.Extension,
 			Inode: uint64(i + 2),
 			Type:  fuse.DT_Block,
 		}
 		dirEntries = append(dirEntries, dirEntry)
 
+		// Create file entry
 		files[dirEntry.Name] = &File{
 			Inode:         dirEntry.Inode,
 			PlaylistEntry: entry,
 		}
-		fmt.Println(dirEntry.Name)
+		fmt.Printf("%d. %s\n", i+1, entry.Title)
 	}
 
 	fs := &FS{
@@ -76,6 +98,7 @@ func run(mountpoint string, filesys *FS) {
 	}
 	defer c.Close()
 
+	fmt.Println("\nStarting filesystem")
 	err = fs.Serve(c, filesys)
 	if err != nil {
 		log.Fatal(err)
@@ -121,9 +144,15 @@ type File struct {
 }
 
 func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
+	bytesPerSec := 16000
+
+	if AudioFormat == "wav" {
+		bytesPerSec = 176400
+	}
+
 	a.Inode = f.Inode
 	a.Mode = 0o444
-	a.Size = uint64(f.PlaylistEntry.Duration.Seconds() * 16000)
+	a.Size = uint64(int(f.PlaylistEntry.Duration.Seconds()) * bytesPerSec)
 	return nil
 }
 
@@ -133,6 +162,10 @@ func (f *File) ReadAll(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 
-	reader := GetAudioReader(video)
+	reader, err := GetAudioReader(video)
+	if err != nil {
+		return nil, err
+	}
+
 	return ioutil.ReadAll(reader)
 }
