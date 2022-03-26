@@ -23,7 +23,7 @@ type AudioType struct {
 }
 
 var AudioFormatMap = map[string]AudioType{
-	"aac":  {"mp4a", "mp4"},
+	"aac":  {"mp4a", "m4a"},
 	"opus": {"opus", "webm"},
 	"wav":  {"mp4a", "wav"}, // aac -> wav
 	"mp3":  {"mp4a", "mp3"}, // aac -> mp3
