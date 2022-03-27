@@ -4,9 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
+	"strings"
 	"syscall"
 
 	"bazil.org/fuse"
@@ -15,7 +16,7 @@ import (
 	"github.com/kkdai/youtube/v2"
 )
 
-var AudioFormat string
+var SelectedAudioFormat string
 
 type AudioType struct {
 	Mime      string
@@ -25,8 +26,8 @@ type AudioType struct {
 var AudioFormatMap = map[string]AudioType{
 	"aac":  {"mp4a", "m4a"},
 	"opus": {"opus", "webm"},
-	"wav":  {"mp4a", "wav"}, // aac -> wav
-	"mp3":  {"mp4a", "mp3"}, // aac -> mp3
+	"wav":  {"wav", "wav"},
+	"mp3":  {"mp3", "mp3"},
 }
 
 func usage() {
@@ -36,11 +37,11 @@ func usage() {
 }
 
 func main() {
-	flag.StringVar(&AudioFormat, "a", "aac", "Set audio format (aac, opus, wav, mp3)")
+	flag.StringVar(&SelectedAudioFormat, "a", "aac", "Set audio format (aac, opus, wav, mp3)")
 	flag.Usage = usage
 	flag.Parse()
 
-	defFormat, exists := AudioFormatMap[AudioFormat]
+	defFormat, exists := AudioFormatMap[SelectedAudioFormat]
 
 	if flag.NArg() != 2 || !exists {
 		usage()
@@ -57,14 +58,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	bytesPerSec := 16000
+
+	if SelectedAudioFormat == "wav" {
+		bytesPerSec = 176400
+	}
+
 	files := map[string]*File{}
 	dirEntries := []fuse.Dirent{}
 
 	fmt.Println("Videos found:")
 	for i, entry := range playlist.Videos {
+		title := strings.ReplaceAll(entry.Title, "/", "|")
+
 		// Create dir entry
 		dirEntry := fuse.Dirent{
-			Name:  entry.Title + "." + defFormat.Extension,
+			Name:  title + "." + defFormat.Extension,
 			Inode: uint64(i + 2),
 			Type:  fuse.DT_Block,
 		}
@@ -72,10 +81,12 @@ func main() {
 
 		// Create file entry
 		files[dirEntry.Name] = &File{
+			Title:         title,
 			Inode:         dirEntry.Inode,
 			PlaylistEntry: entry,
+			Size:          uint64(int(entry.Duration.Seconds()+1) * bytesPerSec),
 		}
-		fmt.Printf("%d. %s\n", i+1, entry.Title)
+		fmt.Printf("%d. %s\n", i+1, title)
 	}
 
 	fs := &FS{
@@ -103,6 +114,8 @@ func run(mountpoint string, filesys *FS) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	fmt.Println("Stopping filesystem")
+	// fuse.Unmount(mountpoint)
 }
 
 // FS implements the ytfs file system.
@@ -139,33 +152,74 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 
 // File implements both Node and Handle for the yt file.
 type File struct {
+	Title         string
 	Inode         uint64
+	Size          uint64
+	Data          []byte
 	PlaylistEntry *youtube.PlaylistEntry
 }
 
 func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
-	bytesPerSec := 16000
-
-	if AudioFormat == "wav" {
-		bytesPerSec = 176400
-	}
-
 	a.Inode = f.Inode
 	a.Mode = 0o444
-	a.Size = uint64(int(f.PlaylistEntry.Duration.Seconds()) * bytesPerSec)
+	a.Size = f.Size
 	return nil
 }
 
-func (f *File) ReadAll(ctx context.Context) ([]byte, error) {
+func (f *File) ReadAll(ctx context.Context) (data []byte, err error) {
+	if len(f.Data) <= 0 {
+		err = f.CacheData(ctx)
+	}
+
+	return f.Data, err
+}
+
+func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+	if len(f.Data) <= 0 {
+		err := f.CacheData(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	end := req.Offset + int64(req.Size)
+	if end > int64(f.Size) {
+		end = int64(f.Size)
+	}
+
+	resp.Data = f.Data[req.Offset:end]
+	return nil
+}
+
+func (f *File) CacheData(ctx context.Context) error {
 	video, err := client.VideoFromPlaylistEntryContext(ctx, f.PlaylistEntry)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	reader, err := GetAudioReader(video)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return ioutil.ReadAll(reader)
+	f.Data = make([]byte, f.Size)
+
+	offset := 0
+	for offset < int(f.Size) {
+		n, err := reader.Read(f.Data[offset:])
+		offset += n
+
+		switch err {
+		case io.EOF:
+			offset = int(f.Size)
+		case nil:
+		default:
+			return err
+		}
+
+		fmt.Printf("\r%s - %.2f%%", f.Title, float32(offset)/float32(f.Size)*100)
+
+	}
+	fmt.Println()
+	return nil
 }

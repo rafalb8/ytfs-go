@@ -21,16 +21,19 @@ func GetPlaylist(url string) (*youtube.Playlist, error) {
 }
 
 func GetAudioReader(video *youtube.Video) (io.ReadCloser, error) {
+	formatFound := false
+
 	var audioFormat *youtube.Format
 	audioFormats := video.Formats.Type("audio")
 	if len(audioFormats) > 0 {
 		audioFormats.Sort()
 		audioFormat = &audioFormats[0]
 
-		defFormat := AudioFormatMap[AudioFormat]
+		mime := AudioFormatMap[SelectedAudioFormat].Mime
 		for _, f := range audioFormats {
-			if strings.Contains(f.MimeType, defFormat.Mime) {
+			if strings.Contains(f.MimeType, mime) {
 				audioFormat = &f
+				formatFound = true
 				break
 			}
 		}
@@ -45,14 +48,13 @@ func GetAudioReader(video *youtube.Video) (io.ReadCloser, error) {
 		return nil, err
 	}
 
-	// Skip format for aac and opus
-	switch AudioFormat {
-	case "aac", "opus":
+	// Format found in stream
+	if formatFound {
 		return reader, nil
 	}
 
 	// Convert other formats
-	ffmpeg := exec.Command("ffmpeg", "-i", "pipe:", "-f", AudioFormat, "pipe:")
+	ffmpeg := exec.Command("ffmpeg", "-i", "pipe:", "-f", SelectedAudioFormat, "pipe:")
 	ffmpeg.Stdin = reader
 	reader, err = ffmpeg.StdoutPipe()
 
