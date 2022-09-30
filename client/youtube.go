@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"fmt"
@@ -9,10 +9,10 @@ import (
 	"github.com/kkdai/youtube/v2"
 )
 
-var client = youtube.Client{}
+var Client = youtube.Client{}
 
 func GetPlaylist(url string) (*youtube.Playlist, error) {
-	playlist, err := client.GetPlaylist(url)
+	playlist, err := Client.GetPlaylist(url)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func GetAudioReader(video *youtube.Video) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("no audio format found after filtering")
 	}
 
-	reader, _, err := client.GetStream(video, audioFormat)
+	reader, _, err := Client.GetStream(video, audioFormat)
 	if err != nil {
 		return nil, err
 	}
